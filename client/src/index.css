@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: Menlo, Monaco, Consolas, 'Courier New', monospace;
+  @apply bg-gray-100 p-0.5 rounded text-sm;
+}
+
+.highlight-char {
+  @apply bg-yellow-200 text-red-700 px-1 rounded font-mono text-xs;
+}
+
+.severity-1 {
+  @apply bg-green-100 text-green-800 border-green-300;
+}
+
+.severity-2 {
+  @apply bg-blue-100 text-blue-800 border-blue-300;
+}
+
+.severity-3 {
+  @apply bg-yellow-100 text-yellow-800 border-yellow-300;
+}
+
+.severity-4 {
+  @apply bg-orange-100 text-orange-800 border-orange-300;
+}
+
+.severity-5 {
+  @apply bg-red-100 text-red-800 border-red-300;
+}
+
+.file-drop-active {
+  @apply border-fortress-accent bg-fortress-light;
+}
+
+.hidden-char {
+  @apply font-mono bg-red-100 text-red-800 px-1 mx-0.5 rounded-sm text-xs border border-red-300;
+}
