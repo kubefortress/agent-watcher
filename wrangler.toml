@@ -1,20 +1,5 @@
 name = "kubefortress-rules-checker"
 compatibility_date = "2025-04-12"
 
-# Configure for Cloudflare Pages deployment
+# This is the only setting needed for Pages
 pages_build_output_dir = "./client/build"
-
-# Configure static site deployment
-[site]
-bucket = "./client/build"
-
-# Use the Pages platform
-[build]
-command = "cd client && npm run build"
-upload.format = "directory"
-
-# Configure custom domains (if applicable)
-# [env.production]
-# routes = [
-#   { pattern = "rules-checker.kubefortress.io", custom_domain = true }
-# ]
