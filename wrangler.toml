@@ -1,0 +1,5 @@
+name = "kubefortress-rules-checker"
+compatibility_date = "2025-04-12"
+
+[site]
+bucket = "./client/build"
