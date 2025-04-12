@@ -18,7 +18,7 @@ const Layout: React.FC = () => {
               <Link to="/" className="flex-shrink-0 flex items-center">
                 <img
                   className="h-10 w-auto"
-                  src="/kubefortress.png"
+                  src="kubefortress.png"
                   alt="KubeFortress"
                 />
                 <span className="ml-2 text-xl font-semibold text-fortress-blue">
