@@ -1,5 +1,5 @@
 # KubeFortress Rules Checker
-
+ 
 ## Overview
 
 KubeFortress Rules Checker is a security tool designed to detect malicious content in AI coding assistant rule files. This web application specifically targets the "Rules File Backdoor" vulnerability, which can be exploited to inject hidden instructions using Unicode character manipulation and other obfuscation techniques.
