@@ -10,6 +10,14 @@ function App() {
   const [scanning, setScanning] = useState(false);
   const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
   const [pastedText, setPastedText] = useState('');
+  const [enableServerProcessing, setEnableServerProcessing] = useState(true);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [scanSettings, setScanSettings] = useState({
+    detectUnicode: true,
+    detectPatterns: true,
+    minSeverity: 2,
+    deepAnalysis: true
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleStartScan = () => {
@@ -166,18 +174,128 @@ function App() {
       textToAnalyze = pastedText;
     }
     
-    // Analyze the text
-    const issues = analyzeText(textToAnalyze);
-    
-    // Create results object
-    const results = {
-      fileName: activeTab === 'upload' ? selectedFile?.name : 'Pasted Rules',
-      scanTime: new Date().toLocaleString(),
-      issues: issues
-    };
-    
-    setScanResults(results);
-    setScanning(false);
+    try {
+      // Determine if we should use server-side processing
+      const isLargeFile = textToAnalyze.length > 100000; // Over 100KB
+      const hasComplexPatterns = textToAnalyze.includes('```') && textToAnalyze.length > 20000;
+      const needsServerProcessing = enableServerProcessing && (isLargeFile || hasComplexPatterns);
+      
+      let issues = [];
+      
+      if (needsServerProcessing) {
+        // Use server-side processing for large or complex files
+        const formData = new FormData();
+        
+        if (activeTab === 'upload' && selectedFile) {
+          formData.append('file', selectedFile);
+        } else {
+          // Create a text file from pasted content
+          const textFile = new File([textToAnalyze], 'pasted-rules.txt', { type: 'text/plain' });
+          formData.append('file', textFile);
+        }
+        
+        // Add scan settings to the request
+        formData.append('deepAnalysis', scanSettings.deepAnalysis.toString());
+        formData.append('detectUnicode', scanSettings.detectUnicode.toString());
+        formData.append('detectPatterns', scanSettings.detectPatterns.toString());
+        formData.append('minSeverity', scanSettings.minSeverity.toString());
+        
+        // Send to server for processing
+        const response = await fetch('http://localhost:8080/api/scan/files', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const scanId = data.scanId;
+        
+        // Poll for results
+        let scanComplete = false;
+        let attempts = 0;
+        let serverResults;
+        
+        while (!scanComplete && attempts < 30) {
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          
+          const statusResponse = await fetch(`http://localhost:8080/api/scan/status/${scanId}`);
+          if (!statusResponse.ok) {
+            throw new Error(`Failed to get scan status: ${statusResponse.status}`);
+          }
+          
+          const statusData = await statusResponse.json();
+          
+          if (statusData.status === 'completed') {
+            scanComplete = true;
+            serverResults = statusData.results[0]; // Get the first file result
+          } else if (statusData.status === 'failed') {
+            throw new Error(statusData.error || 'Server scan failed');
+          }
+          
+          attempts++;
+        }
+        
+        if (!scanComplete) {
+          throw new Error('Scan timed out');
+        }
+        
+        // Convert server results to client format
+        issues = serverResults.suspiciousSections.map((section: any) => ({
+          type: section.reason,
+          severity: section.severity,
+          line: textToAnalyze.substring(0, section.start).split('\n').length,
+          description: section.characters.length > 0 
+            ? `${section.characters.length} suspicious characters detected` 
+            : section.reason,
+          context: section.content
+        }));
+      } else {
+        // Use client-side processing for smaller files
+        issues = analyzeText(textToAnalyze)
+          // Filter issues based on user settings
+          .filter(issue => {
+            if (!scanSettings.detectUnicode && issue.type.includes('Unicode')) {
+              return false;
+            }
+            if (!scanSettings.detectPatterns && 
+                (issue.type.includes('Instruction') || 
+                 issue.type.includes('Pattern'))) {
+              return false;
+            }
+            return issue.severity >= scanSettings.minSeverity;
+          });
+      }
+      
+      // Create results object
+      const results = {
+        fileName: activeTab === 'upload' ? selectedFile?.name : 'Pasted Rules',
+        scanTime: new Date().toLocaleString(),
+        issues: issues
+      };
+      
+      setScanResults(results);
+    } catch (error) {
+      console.error('Scan error:', error);
+      // Show error in UI
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      setScanResults({
+        fileName: activeTab === 'upload' ? selectedFile?.name : 'Pasted Rules',
+        scanTime: new Date().toLocaleString(),
+        issues: [{
+          type: 'Error',
+          severity: 5,
+          line: 0,
+          description: `Error during scan: ${errorMessage}`,
+          context: 'Please try again or use client-side scanning for smaller files'
+        }]
+      });
+    } finally {
+      setScanning(false);
+    }
   };
 
   return (
@@ -269,6 +387,174 @@ function App() {
                     Paste Rules
                   </button>
                 </div>
+                
+                {/* Server processing toggle */}
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    marginBottom: '1.5rem',
+                    padding: '0.75rem',
+                    backgroundColor: '#f8fafc',
+                    borderRadius: '0.375rem',
+                    border: '1px solid #e2e8f0'
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 'medium', marginBottom: '0.25rem' }}>
+                      Advanced Server Processing
+                    </div>
+                    <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                      Use server-side analysis for larger files and more advanced detection
+                    </div>
+                  </div>
+                  <div 
+                    onClick={() => setEnableServerProcessing(!enableServerProcessing)}
+                    className="scanner-toggle-switch"
+                    style={{
+                      width: '3rem',
+                      height: '1.5rem',
+                      backgroundColor: enableServerProcessing ? '#0c4a6e' : '#cbd5e1',
+                      borderRadius: '9999px',
+                      position: 'relative',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <div
+                      className="scanner-toggle-knob"
+                      style={{
+                        width: '1.25rem',
+                        height: '1.25rem',
+                        backgroundColor: 'white',
+                        borderRadius: '9999px',
+                        position: 'absolute',
+                        top: '0.125rem',
+                        left: enableServerProcessing ? '1.625rem' : '0.125rem'
+                      }}
+                    />
+                  </div>
+                </div>
+                
+                {/* Advanced Settings Toggle */}
+                <div
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)} 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    marginBottom: '1rem',
+                    padding: '0.75rem',
+                    backgroundColor: showAdvancedSettings ? '#f0f9ff' : '#f8fafc',
+                    borderRadius: '0.375rem',
+                    border: '1px solid #e2e8f0',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontWeight: 'medium', 
+                      color: showAdvancedSettings ? '#0c4a6e' : '#475569',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}>
+                      Advanced Detection Settings
+                      <svg 
+                        style={{
+                          width: '1rem',
+                          height: '1rem',
+                          marginLeft: '0.5rem',
+                          transform: showAdvancedSettings ? 'rotate(180deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.2s'
+                        }}
+                        viewBox="0 0 20 20" 
+                        fill="currentColor"
+                      >
+                        <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Advanced Settings Panel */}
+                {showAdvancedSettings && (
+                  <div 
+                    style={{
+                      marginBottom: '1.5rem',
+                      padding: '1rem',
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '0.375rem',
+                      border: '1px solid #e2e8f0'
+                    }}
+                  >
+                    <div style={{ marginBottom: '1rem' }}>
+                      <div style={{ marginBottom: '0.5rem', fontWeight: 'medium' }}>Detection Options</div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <input 
+                          type="checkbox" 
+                          id="detectUnicode" 
+                          checked={scanSettings.detectUnicode}
+                          onChange={(e) => setScanSettings({...scanSettings, detectUnicode: e.target.checked})}
+                          style={{ marginRight: '0.5rem' }}
+                        />
+                        <label htmlFor="detectUnicode">Detect hidden Unicode characters</label>
+                      </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <input 
+                          type="checkbox" 
+                          id="detectPatterns" 
+                          checked={scanSettings.detectPatterns}
+                          onChange={(e) => setScanSettings({...scanSettings, detectPatterns: e.target.checked})}
+                          style={{ marginRight: '0.5rem' }}
+                        />
+                        <label htmlFor="detectPatterns">Detect suspicious language patterns</label>
+                      </div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <input 
+                          type="checkbox" 
+                          id="deepAnalysis" 
+                          checked={scanSettings.deepAnalysis}
+                          onChange={(e) => setScanSettings({...scanSettings, deepAnalysis: e.target.checked})}
+                          style={{ marginRight: '0.5rem' }}
+                        />
+                        <label htmlFor="deepAnalysis">Enable deep contextual analysis</label>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <div style={{ marginBottom: '0.5rem', fontWeight: 'medium' }}>Minimum Severity to Report</div>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <input
+                          type="range"
+                          min="1"
+                          max="5"
+                          value={scanSettings.minSeverity}
+                          onChange={(e) => setScanSettings({...scanSettings, minSeverity: parseInt(e.target.value)})}
+                          style={{ flex: 1, marginRight: '0.75rem' }}
+                        />
+                        <span style={{ 
+                          padding: '0.25rem 0.5rem', 
+                          backgroundColor: scanSettings.minSeverity >= 4 ? '#fee2e2' : 
+                                           scanSettings.minSeverity >= 3 ? '#fef3c7' : 
+                                           '#f0fdf4',
+                          color: scanSettings.minSeverity >= 4 ? '#b91c1c' : 
+                                 scanSettings.minSeverity >= 3 ? '#b45309' : 
+                                 '#166534',
+                          borderRadius: '0.25rem',
+                          fontWeight: 'bold',
+                          fontSize: '0.875rem'
+                        }}>
+                          {scanSettings.minSeverity}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                        <span>Low (Show All)</span>
+                        <span>High (Critical Only)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 {/* File Upload Tab Content */}
                 {activeTab === 'upload' && (
@@ -373,10 +659,20 @@ function App() {
                               (activeTab === 'paste' && pastedText.trim()) ? 
                               'pointer' : 'not-allowed',
                       display: 'flex',
-                      alignItems: 'center'
+                      alignItems: 'center',
+                      gap: '0.5rem'
                     }}
                   >
-                    {scanning ? 'Scanning...' : 'Analyze Rules'}
+                    {scanning ? (
+                      <span className="processing-indicator">
+                        <svg className="processing-spinner" style={{ width: '1rem', height: '1rem' }} viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" strokeDasharray="32" strokeDashoffset="8" />
+                        </svg>
+                        {enableServerProcessing ? 'Processing on Server...' : 'Scanning...'}
+                      </span>
+                    ) : (
+                      'Analyze Rules'
+                    )}
                   </button>
                 </div>
               </>
@@ -402,7 +698,7 @@ function App() {
                     borderRadius: '0.5rem',
                     padding: '1rem',
                     marginBottom: '1rem'
-                  }}>
+                  }} className={issue.severity >= 4 ? 'scan-result-error' : issue.severity >= 3 ? 'scan-result-warning' : 'scan-result-success'}>
                     <div style={{ 
                       display: 'flex', 
                       justifyContent: 'space-between',
